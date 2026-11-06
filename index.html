@@ -809,6 +809,23 @@ body:not(.no-pagos) .mod-sinpagos{display:none!important}
           <div class="fg"><label>Email</label><input type="text" id="c-email" placeholder="contacto@herverindustrial.com"/></div>
         </div>
         <div class="fg" style="margin-bottom:14px"><label>Notas al pie</label><textarea id="c-notas" rows="2" style="font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;resize:vertical" placeholder="Condiciones generales, tiempo de entrega, garantías..."></textarea></div>
+        <div class="card-title" style="margin-top:6px">Folios de esta computadora</div>
+        <div class="form-grid g2" style="margin-bottom:14px">
+          <div class="fg"><label>Letra para folios <span style="font-weight:400">(iniciales de quien usa esta compu)</span></label>
+            <input type="text" id="c-letra-folio" maxlength="3" placeholder="Ej. H" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase().replace(/[^A-ZÑ]/g,'');letraFolioHint()"/>
+            <span id="c-letra-folio-hint" style="font-size:11px;color:var(--muted);margin-top:3px"></span>
+          </div>
+        </div>
+        <div class="card-title" style="margin-top:6px">Respaldo de esta computadora</div>
+        <div style="margin-bottom:16px">
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Descarga un archivo con todas las cotizaciones, clientes, órdenes de compra, proveedores, pedidos y la configuración guardados en este navegador. Guárdalo en un lugar seguro (correo, USB o Drive).</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="descargarRespaldo()">Descargar respaldo</button>
+            <label class="btn" for="respaldoInput" style="cursor:pointer">Restaurar respaldo…</label>
+            <input type="file" id="respaldoInput" accept=".json,application/json" style="display:none" onchange="restaurarRespaldo(this)"/>
+          </div>
+          <div id="respaldo-ultimo" style="font-size:11.5px;color:var(--muted);margin-top:8px"></div>
+        </div>
         <div class="card-title" style="margin-top:6px">Módulos (se activan y desactivan al momento)</div>
         <div style="margin-bottom:14px">
           <label class="mod-row"><input type="checkbox" id="mod-pedidos" onchange="setModulo('pedidos',this.checked)"/><span><b>Seguimiento de pedidos</b><small>Menú "Seguimiento de pedidos" y botón "→ Pedido" en el Historial.</small></span></label>
@@ -959,7 +976,14 @@ function showSection(id,btn){
   if(id==="proveedores")renderProveedores();
   if(id==="pedidos")pedVolver();
 }
-function updateFolio(){document.getElementById("folio-display").textContent="COT-"+String(folio).padStart(4,"0")}
+// Folio con la letra del vendedor de esta computadora: COT-H-0278 (sin letra: COT-0278)
+function folioTxt(pref,n){const l=String(config.letraFolio||"").toUpperCase();return pref+"-"+(l?l+"-":"")+String(n).padStart(4,"0");}
+function letraFolioHint(){
+  const el=document.getElementById("c-letra-folio"),h=document.getElementById("c-letra-folio-hint");if(!el||!h)return;
+  const l=el.value.toUpperCase();
+  h.textContent="Siguientes folios: COT-"+(l?l+"-":"")+String(folio).padStart(4,"0")+" · OC-"+(l?l+"-":"")+String(ocFolio).padStart(4,"0")+(l?"":" (sin letra)");
+}
+function updateFolio(){document.getElementById("folio-display").textContent=folioTxt("COT",folio)}
 
 function addProduct(){
   const name=document.getElementById("cat-name").value.trim();
@@ -1505,6 +1529,43 @@ function buildRemisionPDF(q,conPrecios){
 }
 
 
+// ── Respaldo ──
+const RESPALDO_SIN=["hv_ultimo_respaldo"];
+function descargarRespaldo(){
+  const data={};
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(/^hv/.test(k)&&!RESPALDO_SIN.includes(k))data[k]=localStorage.getItem(k);}
+  // La API key de Anthropic no se incluye en el respaldo
+  if(data.hv2_c){try{const c=JSON.parse(data.hv2_c);delete c.apikey;data.hv2_c=JSON.stringify(c);}catch(e){}}
+  const n=k=>{try{return JSON.parse(data[k]||"[]").length}catch(e){return 0}};
+  const resumen={cotizaciones:n("hv2_q"),clientes:n("hv_clientes"),ordenes:n("hv2_oc"),proveedores:n("hv_proveedores"),pedidos:n("hv2_ped")};
+  const letra=(config.letraFolio||"SIN-LETRA");
+  const obj={app:"cotizaciones-herver",version:1,fecha:new Date().toISOString(),letra:config.letraFolio||"",resumen,data};
+  const blob=new Blob([JSON.stringify(obj,null,1)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="respaldo_cotizaciones_"+letra+"_"+hoyStr()+".json";
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+  try{localStorage.setItem("hv_ultimo_respaldo",fechaCorta(hoyStr())+" ("+resumen.cotizaciones+" cotizaciones, "+resumen.clientes+" clientes)");}catch(e){}
+  const ru=document.getElementById("respaldo-ultimo");if(ru)ru.textContent="Último respaldo descargado en esta compu: "+localStorage.getItem("hv_ultimo_respaldo");
+  toast("Respaldo descargado: "+resumen.cotizaciones+" cotizaciones, "+resumen.clientes+" clientes");
+}
+async function restaurarRespaldo(input){
+  const file=input.files[0];input.value="";if(!file)return;
+  let obj;
+  try{obj=JSON.parse(await file.text());}catch(e){uiAlert("El archivo no es un respaldo válido.");return}
+  if(!obj||obj.app!=="cotizaciones-herver"||!obj.data){uiAlert("El archivo no es un respaldo de esta app.");return}
+  const r=obj.resumen||{};
+  const msg="Respaldo del "+fechaCorta(String(obj.fecha||"").slice(0,10))+(obj.letra?(" (letra "+obj.letra+")"):"")+":\n"+
+    (r.cotizaciones||0)+" cotizaciones, "+(r.clientes||0)+" clientes, "+(r.ordenes||0)+" órdenes de compra, "+(r.proveedores||0)+" proveedores, "+(r.pedidos||0)+" pedidos.\n\n"+
+    "Esto REEMPLAZA lo que hay ahorita en esta computadora ("+quotes.length+" cotizaciones, "+clientes.length+" clientes).\n¿Restaurar?";
+  if(!await uiConfirm(msg))return;
+  const apikey=config.apikey||"";
+  Object.keys(localStorage).filter(k=>/^hv/.test(k)&&!RESPALDO_SIN.includes(k)).forEach(k=>localStorage.removeItem(k));
+  Object.entries(obj.data).forEach(([k,v])=>{if(/^hv/.test(k))localStorage.setItem(k,String(v));});
+  // conservar la API key de esta computadora
+  try{const c=JSON.parse(localStorage.getItem("hv2_c")||"{}");if(apikey&&!c.apikey){c.apikey=apikey;localStorage.setItem("hv2_c",JSON.stringify(c));}}catch(e){}
+  await uiAlert("Respaldo restaurado. La página se va a recargar.");
+  location.reload();
+}
 function saveConfig(){
   config={
     nombre:document.getElementById("c-nombre").value,
@@ -1538,11 +1599,15 @@ function saveConfig(){
     factDom:document.getElementById("c-fact-dom").value.trim(),
     factEmail:document.getElementById("c-fact-email").value.trim(),
     _factDefaults:true,
-    letraEstilo:document.getElementById("c-letra-estilo").value
+    letraEstilo:document.getElementById("c-letra-estilo").value,
+    letraFolio:document.getElementById("c-letra-folio").value.toUpperCase().replace(/[^A-ZÑ]/g,"").slice(0,3)
   };
   if(config.usdClabe&&!/^\d{18}$/.test(config.usdClabe))toast("Ojo: la CLABE en dólares debe tener 18 dígitos");
   if(config.bancoClabe&&!/^\d{18}$/.test(config.bancoClabe))toast("Ojo: la CLABE debe tener 18 dígitos");
   save();toast("Datos guardados");
+  if(!window._editingFolio)updateFolio();
+  if(typeof updateOCFolio==="function")updateOCFolio();
+  letraFolioHint();
 }
 function loadConfig(){
   document.getElementById("c-nombre").value=config.nombre||"";
@@ -1561,6 +1626,10 @@ function loadConfig(){
   document.getElementById("c-banco-moneda").value=config.bancoMoneda||"";
   document.getElementById("c-banco-leyenda").value=config.bancoLeyenda||"";
   document.getElementById("c-letra-estilo").value=config.letraEstilo||"banda";
+  document.getElementById("c-letra-folio").value=config.letraFolio||"";
+  letraFolioHint();
+  let ult="";try{ult=localStorage.getItem("hv_ultimo_respaldo")||"";}catch(e){}
+  document.getElementById("respaldo-ultimo").textContent=ult?("Último respaldo descargado en esta compu: "+ult):"Todavía no se ha descargado ningún respaldo en esta compu.";
   [["c-bodega-dir","bodegaDir"],["c-fact-razon","factRazon"],["c-fact-rfc","factRfc"],["c-fact-regimen","factRegimen"],["c-fact-cp","factCp"],["c-fact-dom","factDom"],["c-fact-email","factEmail"]]
     .forEach(([id,k])=>{document.getElementById(id).value=config[k]||"";});
   ["benef","nombre","suc","cuenta","clabe","swift","leyenda"].forEach(k=>{
@@ -1593,7 +1662,7 @@ function generatePDF(){
   quoteItems.forEach(x=>x.desc=String(x.desc||"").replace(/\s+/g," ").trim());
   if(quoteItems.some(x=>!x.desc)){alert("Hay una partida sin descripción.");return}
   if(quoteItems.some(x=>!(x.price>0))){alert("Hay partidas sin precio. Captúralo antes de generar la cotización.");return}
-  const f="COT-"+String(folio).padStart(4,"0");
+  const f=folioTxt("COT",folio);
   const now=new Date();
   const fecha=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
   const envData=getEnvio();
@@ -2185,7 +2254,7 @@ function formaTexto(o){
 
 function updateOCFolio(){
   if(window._editingOC)return;
-  ocEl("oc-folio-display").textContent="OC-"+String(ocFolio).padStart(4,"0");
+  ocEl("oc-folio-display").textContent=folioTxt("OC",ocFolio);
 }
 function ocFillCotList(){
   const dl=ocEl("oc-cot-list");if(!dl)return;
@@ -2401,7 +2470,7 @@ async function generarOC(){
   const c=ocCondiciones(),t=ocCalc();
   const lugarSel=ocEl("oc-lugar").value;
   const prev=window._editingOC?ordenes.find(x=>x.folio===window._editingOC):null;
-  const f=prev?prev.folio:"OC-"+String(ocFolio).padStart(4,"0");
+  const f=prev?prev.folio:folioTxt("OC",ocFolio);
   const o={
     folio:f,fecha:c.fecha,
     proveedor:prov,rfc:ocEl("oc-rfc").value.trim(),contacto:ocEl("oc-contacto").value.trim(),
