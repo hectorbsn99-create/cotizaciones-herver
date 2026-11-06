@@ -172,7 +172,14 @@ input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-in
 
 /* ── VENTANAS PROPIAS (reemplazan alert/confirm/prompt del navegador) ── */
 .ui-ov{position:fixed;inset:0;background:rgba(17,24,39,0.45);display:flex;align-items:center;justify-content:center;z-index:2000;padding:16px}
-.ui-box{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,0.25);width:100%;max-width:440px;padding:20px}
+.ui-box{background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,0.25);width:100%;max-width:440px;padding:20px;position:relative}
+.ui-x{position:absolute;top:10px;right:10px;width:30px;height:30px;border:none;background:none;border-radius:8px;font-size:20px;line-height:1;color:var(--muted);cursor:pointer}
+.ui-x:hover{background:var(--gray-light);color:var(--text)}
+.ui-title{font-size:15px;font-weight:600;color:var(--text);margin:0 30px 6px 0}
+.ui-opts{display:flex;flex-direction:column;gap:8px}
+.ui-opt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer;font-size:14px;font-weight:600;color:var(--text);transition:all .15s}
+.ui-opt:hover,.ui-opt:focus{border-color:var(--blue);background:var(--blue-light);outline:none}
+.ui-opt small{font-size:12px;font-weight:400;color:var(--muted)}
 .ui-msg{font-size:14px;color:var(--text);white-space:pre-line;line-height:1.5;margin-bottom:14px}
 .ui-box input{width:100%;font-size:14px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-bottom:14px}
 .ui-box input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,79,171,0.12)}
@@ -898,25 +905,34 @@ const _uiQueue=[];let _uiBusy=false;
 function _uiNext(){
   if(_uiBusy||!_uiQueue.length)return;
   _uiBusy=true;
-  const {tipo,msg,def,resolve}=_uiQueue.shift();
+  const {tipo,msg,def,opts,titulo,resolve}=_uiQueue.shift();
   const ov=document.createElement("div");ov.className="ui-ov";ov.setAttribute("role","dialog");
   const esc2=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  ov.innerHTML='<div class="ui-box"><div class="ui-msg">'+esc2(msg)+'</div>'+
+  ov.innerHTML='<div class="ui-box"><button class="ui-x" title="Cerrar" aria-label="Cerrar">×</button>'+
+    (titulo?'<div class="ui-title">'+esc2(titulo)+'</div>':"")+
+    '<div class="ui-msg">'+esc2(msg)+'</div>'+
     (tipo==="prompt"?'<input type="text" class="ui-in" value="'+esc2(def)+'"/>':"")+
-    '<div class="ui-btns">'+(tipo==="alert"?"":'<button class="btn ui-no">Cancelar</button>')+
-    '<button class="btn btn-primary ui-ok">'+(tipo==="alert"?"Entendido":"Aceptar")+'</button></div></div>';
+    (tipo==="choice"
+      ?'<div class="ui-opts">'+(opts||[]).map((o,i)=>'<button class="ui-opt" data-i="'+i+'">'+esc2(o.label)+(o.desc?'<small>'+esc2(o.desc)+'</small>':"")+'</button>').join("")+'</div>'
+      :'<div class="ui-btns">'+(tipo==="alert"?"":'<button class="btn ui-no">Cancelar</button>')+
+       '<button class="btn btn-primary ui-ok">'+(tipo==="alert"?"Entendido":"Aceptar")+'</button></div>')+'</div>';
   document.body.appendChild(ov);
   const inp=ov.querySelector(".ui-in");
   const close=val=>{document.removeEventListener("keydown",onKey,true);ov.remove();_uiBusy=false;resolve(val);setTimeout(_uiNext,0);};
   const ok=()=>close(tipo==="prompt"?inp.value:(tipo==="confirm"?true:undefined));
-  const no=()=>close(tipo==="prompt"?null:(tipo==="confirm"?false:undefined));
-  const onKey=e=>{if(e.key==="Escape"){e.preventDefault();no();}else if(e.key==="Enter"){e.preventDefault();ok();}};
+  const no=()=>close(tipo==="prompt"||tipo==="choice"?null:(tipo==="confirm"?false:undefined));
+  const onKey=e=>{if(e.key==="Escape"){e.preventDefault();no();}else if(e.key==="Enter"&&tipo!=="choice"){e.preventDefault();ok();}};
   document.addEventListener("keydown",onKey,true);
-  ov.querySelector(".ui-ok").onclick=ok;
+  ov.querySelector(".ui-x").onclick=no;
+  ov.addEventListener("mousedown",e=>{if(e.target===ov)no();});
+  const okb=ov.querySelector(".ui-ok");if(okb)okb.onclick=ok;
   const nb=ov.querySelector(".ui-no");if(nb)nb.onclick=no;
-  setTimeout(()=>{if(inp){inp.focus();inp.select();}else ov.querySelector(".ui-ok").focus();},30);
+  ov.querySelectorAll(".ui-opt").forEach(b=>b.onclick=()=>close(opts[+b.dataset.i].value));
+  setTimeout(()=>{if(inp){inp.focus();inp.select();}else{const f=ov.querySelector(".ui-ok,.ui-opt");if(f)f.focus();}},30);
 }
-function _ui(tipo,msg,def){return new Promise(resolve=>{_uiQueue.push({tipo,msg,def,resolve});_uiNext();});}
+function _ui(tipo,msg,def,opts,titulo){return new Promise(resolve=>{_uiQueue.push({tipo,msg,def,opts,titulo,resolve});_uiNext();});}
+// Ventana con botones de opción; regresa el value elegido o null si se cierra con la tacha / Esc
+function uiChoice(titulo,msg,opts){return _ui("choice",msg,"",opts,titulo);}
 function uiConfirm(msg){return _ui("confirm",msg);}
 function uiPrompt(msg,def){return _ui("prompt",msg,def==null?"":def);}
 function uiAlert(msg){return _ui("alert",msg);}
@@ -1349,7 +1365,11 @@ function reprintPDF(f){const q=quotes.find(x=>x.folio===f);if(q)buildPDF(q)}
 // ═══════════════ REMISIÓN (comprobante de entrega) ═══════════════
 async function imprimirRemision(folioCot){
   const q=quotes.find(x=>x.folio===folioCot);if(!q)return;
-  const conPrecios=await uiConfirm("Remisión de "+q.folio+" — "+q.cliente+"\n\n¿Incluir precios en la remisión?\n\nAceptar = con precios · Cancelar = sin precios");
+  const op=await uiChoice("Imprimir remisión","Cotización "+q.folio+" · "+q.cliente,[
+    {value:"con",label:"Con precios",desc:"Incluye precios unitarios, subtotal, IVA y total"},
+    {value:"sin",label:"Sin precios",desc:"Solo cantidades y descripción (ideal para quien recibe)"}]);
+  if(!op)return;
+  const conPrecios=op==="con";
   buildRemisionPDF(q,conPrecios);
   // Si hay pedido en seguimiento, queda registrado
   try{
