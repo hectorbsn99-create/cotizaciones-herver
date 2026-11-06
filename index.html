@@ -377,7 +377,7 @@ input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-in
             <select id="q-env-tipo" onchange="envioUI();renderItems()">
               <option value="">Sin especificar</option>
               <option value="recoge">Recoge el cliente</option>
-              <option value="incluido">Pagado – en precio unitario</option>
+              <option value="incluido">Pagado – desglosado en partidas</option>
               <option value="cobrar">Por cobrar (paga el cliente al recibir)</option>
             </select>
           </div>
@@ -430,6 +430,7 @@ input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-in
           <span style="text-align:right">Importe</span><span></span>
         </div>
         <div id="items-container"><div class="empty">Sin partidas aún.</div></div>
+        <div id="env-item-row"></div>
         <div class="totals" id="totals-box" style="display:none">
           <div class="totals-box">
             <div class="t-row"><span>Subtotal</span><span id="sub-total">$0.00</span></div>
@@ -972,6 +973,7 @@ function renderItems(){
   const tb=document.getElementById("totals-box");
   if(!quoteItems.length){
     el.innerHTML='<div class="empty">Sin partidas aún.</div>';
+    const er=document.getElementById("env-item-row");if(er)er.innerHTML="";
     ct.textContent="0 partidas";tb.style.display="none";return;
   }
   tb.style.display="flex";
@@ -1016,8 +1018,18 @@ function updateQuoteTotals(){
   const iva=(sub-descMonto+envio)*0.16;
   document.getElementById("envio-row").style.display=envio>0?"flex":"none";
   document.getElementById("envio-total").textContent="$"+fmt(envio);
+  document.getElementById("envio-row").firstElementChild.textContent="Envío / flete";
+  document.getElementById("sub-total").previousElementSibling.textContent=envio>0?"Productos":"Subtotal";
+  const er=document.getElementById("env-item-row");
+  er.innerHTML=envio>0&&quoteItems.length?`<div class="item-row" style="background:#F9FAFB">
+      <div style="font-weight:600;font-size:13px;padding:5px 7px">ENVÍO / FLETE <span style="font-weight:400;color:var(--muted);font-size:11.5px">· SERV</span></div>
+      <div style="text-align:center;font-size:13px">1</div>
+      <div style="text-align:right;font-size:13px">$${fmt(envio)}</div>
+      <div style="font-size:11.5px;color:var(--muted)">Se edita en Envío</div>
+      <div style="text-align:right;font-weight:600;color:var(--blue)">$${fmt(envio)}</div><div></div>
+    </div>`:"";
   document.getElementById("sub-total").textContent="$"+fmt(sub);
-  document.getElementById("desc-label").textContent=descPct>0?("Descuento "+descPct+"%"+(pp>0?" (no aplica al envío)":"")):"Descuentos";
+  document.getElementById("desc-label").textContent=descPct>0?("Descuento "+descPct+"%"+(envio>0?" (sobre productos)":"")):"Descuentos";
   document.getElementById("desc-total").textContent=(descMonto>0?"-$":"$")+fmt(descMonto);
   document.getElementById("desc-total").style.color=descMonto>0?"#15803d":"";
   document.getElementById("iva-total").textContent="$"+fmt(iva);
@@ -1042,12 +1054,14 @@ function getEnvio(){
 }
 // Envío "repartido en el precio unitario": costo total / total de piezas (redondeado a centavos)
 function envioPorPieza(items,env){
+  return 0; // El envío ya no se reparte en el precio unitario: va como renglón aparte "ENVÍO / FLETE"
   if(!env||env.tipo!=="incluido"||!(env.costo>0))return 0;
   const pz=(items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0),0);
   return pz>0?Math.round(env.costo/pz*100)/100:0;
 }
 function envioPPHint(pp){
   const h=document.getElementById("q-env-pp-hint");if(!h)return;
+  h.textContent="";return;
   const env=getEnvio();
   if(env.tipo!=="incluido"){h.textContent="";return}
   const pz=quoteItems.reduce((s,i)=>s+(parseInt(i.qty)||0),0);
@@ -1056,12 +1070,12 @@ function envioPPHint(pp){
   const rec=Math.round(pp*pz*100)/100;
   h.textContent="= $"+fmt(pp)+" por pieza ("+pz+" pza"+(pz===1?"":"s")+")"+(Math.abs(rec-env.costo)>0.004?(" · total repartido $"+fmt(rec)+" por redondeo"):"");
 }
-function getEnvioCosto(){const e=document.getElementById("q-env-tipo");if(!e||e.value!=="cotizado")return 0;return Math.max(0,Math.round((parseFloat(document.getElementById("q-env-costo").value)||0)*100)/100)}
+function getEnvioCosto(){const e=document.getElementById("q-env-tipo");if(!e||(e.value!=="cotizado"&&e.value!=="incluido"))return 0;return Math.max(0,Math.round((parseFloat(document.getElementById("q-env-costo").value)||0)*100)/100)}
 function envioUI(){
   const t=document.getElementById("q-env-tipo").value;
   document.querySelectorAll(".env-dep").forEach(x=>x.style.display=(t&&t!=="recoge")?"flex":"none");
   document.getElementById("env-costo-wrap").style.display=(t==="cotizado"||t==="incluido")?"flex":"none";
-  document.getElementById("env-costo-label").textContent=t==="incluido"?"Envío total sin IVA (se reparte)":"Costo del envío";
+  document.getElementById("env-costo-label").textContent="Costo del envío sin IVA";
 }
 function setEnvio(e){
   e=e||{};
@@ -1127,7 +1141,7 @@ function envioColumnas(e,items){
   const c=[];
   if(e.tipo==="recoge")c.push(["FLETE","RECOGE EN NUESTRA SUCURSAL"]);
   else if(e.tipo){
-    c.push(["FLETE",{incluido:"PAGADO, INCLUIDO EN PRECIO",cotizado:"PAGADO",cobrar:"POR COBRAR"}[e.tipo]||""]);
+    c.push(["FLETE",{incluido:(parseFloat(e.porPieza)>0?"PAGADO, INCLUIDO EN PRECIO":"PAGADO, DESGLOSADO EN PARTIDAS"),cotizado:"PAGADO, DESGLOSADO EN PARTIDAS",cobrar:"POR COBRAR"}[e.tipo]||""]);
     c.push(["ENTREGA",e.entrega==="ocurre"?"OCURRE (EN PAQUETERÍA)":"A DOMICILIO"]);
     if(e.paqueteria)c.push(["PAQUETERÍA",e.paqueteria]);
   }
@@ -1147,7 +1161,7 @@ function tiempoEntregaTexto(e,items){
 }
 // Nota bajo la tabla cuando el envío va incluido en el precio unitario
 function envioNotaIncluido(e){
-  if(!e||e.tipo!=="incluido")return "";
+  if(!e||e.tipo!=="incluido"||!(parseFloat(e.porPieza)>0))return "";
   return "* Los precios unitarios ya incluyen el envío.";
 }
 function envioTexto(e){
@@ -1403,7 +1417,7 @@ function buildRemisionPDF(q,conPrecios){
   if(conPrecios){
     const dPct=parseFloat(q.descuento)||0,dMonto=parseFloat(q.descMonto)||0,envC=parseFloat(q.envioCosto)||0;
     const rows=[["Subtotal",fmt(q.subtotal)]];
-    if(dMonto>0)rows.push(["Descuento "+dPct+"%"+(PP>0?" (no aplica al envío)":""),"-"+fmt(dMonto)]);
+    if(dMonto>0)rows.push(["Descuento "+dPct+"%"+(envC>0?" (sobre productos)":(PP>0?" (no aplica al envío)":"")),"-"+fmt(dMonto)]);
     if(envC>0)rows.push(["Envío",fmt(envC)]);
     rows.push(["I.V.A.",fmt(q.iva)]);
     ensure(rows.length*5+16,false);
@@ -1770,7 +1784,9 @@ function buildPDF(q){
   const totalsH=15+(envC>0?5:0)+8+7+(ANT>0?(ANT<100?13:8):0)+4;
   let rowsOnPage=0;
   tableHeader();
-  q.items.forEach((item,i)=>{
+  // El envío va como renglón aparte al final de las partidas
+  const filas=q.items.concat(envC>0?[{desc:"ENVÍO / FLETE",qty:1,um:"SERV",price:envC,entrega:"",_env:true}]:[]);
+  filas.forEach((item,i)=>{
     doc.setFont("helvetica","normal");doc.setFontSize(8);
     const dl=doc.splitTextToSize(String(item.desc||""),C.descW);
     doc.setFontSize(7);
@@ -1778,7 +1794,7 @@ function buildPDF(q){
     const nL=Math.max(dl.length,el.length,1);
     const rh=Math.max(7.5,3.6+nL*3.6);
     // La última partida se va junto con los totales para que no queden solos en una hoja
-    const isLast=i===q.items.length-1;
+    const isLast=i===filas.length-1;
     if(isLast&&rowsOnPage>1&&y+rh+5+totalsH>BOTTOM&&y+rh<=BOTTOM){doc.addPage();contHeader();tableHeader();rowsOnPage=0;}
     if(ensure(rh,true))rowsOnPage=0;
     rowsOnPage++;
@@ -1788,11 +1804,11 @@ function buildPDF(q){
     const ty0=y+4.9;
     doc.setTextColor(...TEXT);doc.setFont("helvetica","normal");doc.setFontSize(8);
     doc.text(String(parseInt(item.qty)||0),C.cant,ty0);
-    doc.text("PZA",C.um,ty0);
+    doc.text(item.um||"PZA",C.um,ty0);
     doc.text(dl,C.desc,ty0,{lineHeightFactor:1.27});
     if(el.length){doc.setTextColor(...GRAY);doc.setFontSize(7);doc.text(el,C.dias,ty0,{lineHeightFactor:1.45});doc.setTextColor(...TEXT);doc.setFontSize(8);}
     doc.setFont("helvetica","bold");
-    const puF=(parseFloat(item.price)||0)+PP;
+    const puF=(parseFloat(item.price)||0)+(item._env?0:PP);
     fitSize(fmt(puF),C.pu-C.dias-C.diasW-2,8,6);
     doc.text(fmt(puF),C.pu,ty0,{align:"right"});
     fitSize(fmt(item.qty*puF),C.tot-C.pu-3,8,6);
@@ -1814,8 +1830,8 @@ function buildPDF(q){
   }
   const trightV=W-M-3;
   const dPct=parseFloat(q.descuento)||0, dMonto=parseFloat(q.descMonto)||0;
-  const tRows=[["Subtotal",fmt(q.subtotal)],[dPct>0?("Descuento "+dPct+"%"+(PP>0?" (no aplica al envío)":"")):"Descuentos",(dMonto>0?"-":"")+fmt(dMonto)]];
-  if(envC>0)tRows.push(["Envío"+(q.envio&&q.envio.paqueteria?(" ("+lines(q.envio.paqueteria,30,1)[0]+")"):""),fmt(envC)]);
+  const tRows=[[envC>0?"Productos":"Subtotal",fmt(q.subtotal)],[dPct>0?("Descuento "+dPct+"%"+(envC>0?" (sobre productos)":(PP>0?" (no aplica al envío)":""))):"Descuentos",(dMonto>0?"-":"")+fmt(dMonto)]];
+  if(envC>0)tRows.push(["Envío / flete",fmt(envC)]);
   tRows.push(["I.V.A.",fmt(q.iva)]);
   tRows.forEach(([l,v])=>{
     doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(...GRAY);
