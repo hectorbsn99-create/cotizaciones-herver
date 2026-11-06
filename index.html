@@ -1695,6 +1695,7 @@ function buildPDF(q){
   if(q.contacto)conds.push(["CONTACTO:",String(q.contacto)]);
   const cred=parseInt(q.credito)||0;
   conds.push(["CONDICIONES DE PAGO:",ANT>0?(ANT>=100?"100% ANTICIPO":ANT+"% ANTICIPO, "+(100-ANT)+"% CONTRA ENTREGA"):(cred>0?("CRÉDITO "+cred+" DÍAS"):"CONTADO")]);
+  if(q.vendedor)conds.push(["VENDEDOR:",String(q.vendedor).toUpperCase()]);
   conds.forEach(([lbl,val])=>{
     doc.setFont("helvetica","bold");doc.setFontSize(7);doc.setTextColor(...GRAY);
     doc.text(lbl,xR,yR);
@@ -1869,7 +1870,7 @@ function buildPDF(q){
   // Importe con letra en banda azul (opcional): va junto con la firma
   let lBox=0,llL=[];
   if(letraBanda){doc.setFont("helvetica","normal");doc.setFontSize(8);llL=doc.splitTextToSize(letraTxt,W-M*2-8);lBox=4+llL.length*3.9;}
-  const firmaNeed=(q.vendedor?14:2)+(letraBanda?6+lBox+3:0);
+  const firmaNeed=2+(letraBanda?6+lBox+3:0);
   if(y+firmaNeed>(hasBank?bankMaxY-2:BOTTOM)){doc.addPage();contHeader();}
   if(letraBanda){
     doc.setFillColor(...BLUE);doc.rect(M,y,W-M*2,6,"F");
@@ -1882,22 +1883,11 @@ function buildPDF(q){
     y+=lBox+3;
   }
 
-  // ── VENDEDOR (sin firma; en cotizaciones no va firma del cliente, solo en remisiones) ──
-  if(q.vendedor){
-    const fw=72,vx=M+fw/2,vy=y+5;
-    doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(...TEXT);
-    const vl=lines(String(q.vendedor).toUpperCase(),fw,2);
-    doc.text(vl,vx,vy,{align:"center",lineHeightFactor:1.3});
-    doc.setFont("helvetica","normal");doc.setFontSize(6.5);doc.setTextColor(...GRAY);
-    doc.text("VENDEDOR",vx,vy+3.5+(vl.length-1)*3.4,{align:"center"});
-    y=vy+6+(vl.length-1)*3.4;
-  }
-
-  // ── DATOS BANCARIOS (fijos en la parte inferior de la última hoja) ──
+  // ── DATOS BANCARIOS (justo después del importe con letra, sin hueco) ──
   if(hasBank){
     const bH=bankH, bW=W-M*2;
-    let bY=Math.max(bankY,y+2);
-    if(bY>bankMaxY){doc.addPage();contHeader();bY=bankY;}
+    let bY=y+3;
+    if(bY>bankMaxY){doc.addPage();contHeader();bY=y+3;}
     doc.setFillColor(239,244,255);doc.setDrawColor(199,215,240);doc.setLineWidth(0.3);
     doc.roundedRect(M,bY,bW,bH,2,2,"FD");
     doc.setFillColor(...BLUE);doc.rect(M,bY+2,1.6,bH-4,"F");
