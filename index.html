@@ -391,7 +391,7 @@ body:not(.no-pagos) .mod-sinpagos{display:none!important}
         <div class="card-title">Envío</div>
         <div class="form-grid g4" style="margin-bottom:0">
           <div class="fg"><label>Tipo de flete</label>
-            <select id="q-env-tipo" onchange="envioUI();renderItems()">
+            <select id="q-env-tipo" onchange="envioUI();envioDiasHint();renderItems()">
               <option value="">Sin especificar</option>
               <option value="recoge">Recoge el cliente</option>
               <option value="incluido">Pagado – desglosado en partidas</option>
@@ -430,7 +430,7 @@ body:not(.no-pagos) .mod-sinpagos{display:none!important}
             <div class="autocomplete-list" id="man-ac-list" style="max-height:320px;min-width:420px"></div></div>
           <div class="fg"><label>Cant.</label><input type="number" id="man-qty" value="1" min="1" step="1"/></div>
           <div class="fg"><label>P. Unit.</label><input type="number" id="man-price" placeholder="0.00" step="0.01"/></div>
-          <div class="fg"><label>Días entrega</label><input type="text" id="man-entrega" placeholder="INMEDIATO"/></div>
+          <div class="fg"><label>Días entrega</label><input type="text" id="man-entrega" placeholder="Por confirmar"/></div>
           <button class="btn btn-primary btn-icon" onclick="addManual()" style="height:36px">+</button>
         </div>
       </div>
@@ -1064,7 +1064,7 @@ function renderItems(){
       <textarea class="item-desc" rows="1" title="Clic para editar la descripción" oninput="qLive(${i},'desc',this)">${esc(item.desc)}</textarea>
       <input type="number" value="${item.qty}" min="1" style="width:100%;text-align:center" oninput="qLive(${i},'qty',this)"/>
       <div><input type="number" value="${item.price>0?item.price:""}" min="0" step="0.01" placeholder="Precio" style="width:100%;text-align:right;${item.price>0?"":"border-color:#F87171;background:#FEF2F2"}" oninput="qLive(${i},'price',this)"/><div class="env-pp" id="q-pp-${i}"></div></div>
-      <input type="text" value="${esc(item.entrega||"")}" placeholder="INMEDIATO" style="font-size:12px;text-transform:uppercase" onchange="changeEntrega(${i},this.value)"/>
+      <input type="text" value="${esc(item.entrega||"")}" placeholder="Por confirmar" style="font-size:12px;text-transform:uppercase" onchange="changeEntrega(${i},this.value)"/>
       <div id="q-imp-${i}" style="text-align:right;font-weight:600;color:var(--blue)">$${fmt(item.qty*item.price)}</div>
       <button class="btn btn-danger btn-sm btn-icon" onclick="removeItem(${i})">✕</button>
     </div>`).join("");
@@ -1180,7 +1180,8 @@ function diasHabilesTexto(v){
 }
 function envioDiasHint(){
   const t=diasHabilesTexto(document.getElementById("q-env-dias").value);
-  document.getElementById("q-env-dias-hint").textContent=t?("En el PDF: "+t):"";
+  const tipo=document.getElementById("q-env-tipo").value;
+  document.getElementById("q-env-dias-hint").textContent=t?("En el PDF: "+t):(tipo?("Si lo dejas vacío y las partidas no traen días: "+TIEMPO_SIN_DEFINIR):"");
 }
 // Texto del envío para el PDF
 // Renglones de envío para Condiciones del PDF: [[etiqueta, valor], ...]
@@ -1239,8 +1240,12 @@ function tiempoEntregaTexto(e,items){
     if(new Set(vals).size>1)return "SEGÚN PARTIDA";
     return diasHabilesTexto(conValor[0]);
   }
-  return diasHabilesTexto(e&&e.dias);
+  const d=diasHabilesTexto(e&&e.dias);
+  // Sin tiempo capturado: nunca se compromete "inmediato"; se indica que se confirmará
+  if(!d&&e&&e.tipo)return TIEMPO_SIN_DEFINIR;
+  return d;
 }
+const TIEMPO_SIN_DEFINIR="POR CONFIRMAR";
 // Nota bajo la tabla cuando el envío va incluido en el precio unitario
 function envioNotaIncluido(e){
   if(!e||e.tipo!=="incluido"||!(parseFloat(e.porPieza)>0))return "";
@@ -1916,12 +1921,14 @@ function buildPDF(q){
   let rowsOnPage=0;
   tableHeader();
   // El envío va como renglón aparte al final de las partidas
+  const algunaConDias=q.items.some(i=>String(i.entrega||"").trim());
   const filas=q.items.concat(envC>0?[{desc:"ENVÍO / FLETE",qty:1,um:"SERV",price:envC,entrega:"",_env:true}]:[]);
   filas.forEach((item,i)=>{
     doc.setFont("helvetica","normal");doc.setFontSize(8);
     const dl=doc.splitTextToSize(String(item.desc||""),C.descW);
     doc.setFontSize(7);
-    const el=item.entrega?doc.splitTextToSize(String(item.entrega).toUpperCase(),C.diasW):[];
+    const entTxt=item.entrega?String(item.entrega).toUpperCase():((!item._env&&algunaConDias)?TIEMPO_SIN_DEFINIR:"");
+    const el=entTxt?doc.splitTextToSize(entTxt,C.diasW):[];
     const nL=Math.max(dl.length,el.length,1);
     const rh=Math.max(7.5,3.6+nL*3.6);
     // La última partida se va junto con los totales para que no queden solos en una hoja
