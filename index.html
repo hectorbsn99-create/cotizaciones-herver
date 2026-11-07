@@ -1181,7 +1181,7 @@ function diasHabilesTexto(v){
 function envioDiasHint(){
   const t=diasHabilesTexto(document.getElementById("q-env-dias").value);
   const tipo=document.getElementById("q-env-tipo").value;
-  document.getElementById("q-env-dias-hint").textContent=t?("En el PDF: "+t):(tipo?("Si lo dejas vacío y las partidas no traen días: "+TIEMPO_SIN_DEFINIR):"");
+  document.getElementById("q-env-dias-hint").textContent=t?("En el PDF: "+t):(tipo?("Si lo dejas vacío y las partidas no traen días: "+(tipo==="cobrar"?TIEMPO_PAQUETERIA:TIEMPO_SIN_DEFINIR)):"");
 }
 // Texto del envío para el PDF
 // Renglones de envío para Condiciones del PDF: [[etiqueta, valor], ...]
@@ -1242,10 +1242,11 @@ function tiempoEntregaTexto(e,items){
   }
   const d=diasHabilesTexto(e&&e.dias);
   // Sin tiempo capturado: nunca se compromete "inmediato"; se indica que se confirmará
-  if(!d&&e&&e.tipo)return TIEMPO_SIN_DEFINIR;
+  if(!d&&e&&e.tipo)return e.tipo==="cobrar"?TIEMPO_PAQUETERIA:TIEMPO_SIN_DEFINIR;
   return d;
 }
 const TIEMPO_SIN_DEFINIR="POR CONFIRMAR";
+const TIEMPO_PAQUETERIA="SEGÚN PAQUETERÍA"; // por cobrar: el tiempo lo da la paquetería
 // Nota bajo la tabla cuando el envío va incluido en el precio unitario
 function envioNotaIncluido(e){
   if(!e||e.tipo!=="incluido"||!(parseFloat(e.porPieza)>0))return "";
