@@ -197,6 +197,7 @@ input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-in
 .fx-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 10px}
 .fx-sum div{background:var(--gray-light);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--muted)}
 .fx-sum b{display:block;font-size:14px;color:var(--text)}
+.fx-nota{display:block;font-size:10px;color:var(--muted);margin-top:2px;line-height:1.25}
 .fx-ok{font-size:12px;padding:8px 10px;border-radius:8px;background:#F0FDF4;border:1px solid #BBF7D0;color:#15803d;margin-bottom:10px}
 .fx-warn{background:#FEF3C7;border-color:#FDE68A;color:#92400E}
 
@@ -1419,18 +1420,21 @@ function preciosFacturar(folio){
   const r=calcularFacturacion(q);
   const conDec=r.filas.some(f=>Math.abs(f.pu*100-Math.round(f.pu*100))>1e-6);
   const cuadra=Math.abs(r.total-(parseFloat(q.total)||0))<0.015;
+  const dM=parseFloat(q.descMonto)||0, baseProd=(q.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.price)||0),0);
+  let dP=parseFloat(q.descuento)||0; if(!dP&&dM>0&&baseProd>0)dP=Math.round(dM/baseProd*10000)/100;
+  const dPtxt=dP?(String(dP).replace(/\.?0+$/,"")+"%"):"";
   const ov=document.createElement("div");ov.className="ui-ov";
   ov.innerHTML=`<div class="ui-box fx-box"><button class="ui-x" title="Cerrar">×</button>
     <div class="ui-title">Precios para facturar · ${esc(q.folio)}</div>
-    <div class="ui-msg" style="margin-bottom:8px">${esc(q.cliente)} · Captura en la factura el <b>precio unitario para facturar</b> de cada partida. Ya trae el envío repartido entre las piezas${(parseFloat(q.descMonto)||0)>0?" y el descuento aplicado":""}, así que <b>no captures el flete ni el descuento aparte</b>.</div>
+    <div class="ui-msg" style="margin-bottom:8px">${esc(q.cliente)} · Captura en la factura el <b>precio unitario para facturar</b> de cada partida. Ya trae el envío repartido entre las piezas${(parseFloat(q.descMonto)||0)>0?" y el descuento del "+dPtxt+" aplicado":""}, así que <b>no captures el flete ni el descuento aparte</b>.</div>
     <div class="fx-sum">
       <div>Envío a repartir<b>$${fmt(r.envio)}</b></div>
       <div>Piezas<b>${r.pz}</b></div>
       <div>Envío por pieza<b>$${fmt(r.pz?r.envio/r.pz:0)}</b></div>
-      <div>Descuento<b>${(parseFloat(q.descMonto)||0)>0?("-$"+fmt(q.descMonto)):"—"}</b></div>
+      <div>Descuento${dM>0?" "+dPtxt:""}<b>${dM>0?("-$"+fmt(dM)):"—"}</b>${dM>0?`<span class="fx-nota">${dPtxt} de $${fmt(baseProd)} (solo productos, no al envío)</span>`:""}</div>
     </div>
     <div style="overflow-x:auto"><table class="fx-tbl">
-      <thead><tr><th>Cant.</th><th>Descripción</th><th>P. cotizado</th>${(parseFloat(q.descMonto)||0)>0?"<th>− Desc.</th>":""}<th>+ Envío</th><th>Precio unitario para facturar</th><th>Importe</th></tr></thead>
+      <thead><tr><th>Cant.</th><th>Descripción</th><th>P. cotizado</th>${(parseFloat(q.descMonto)||0)>0?"<th>− Desc. "+dPtxt+"</th>":""}<th>+ Envío</th><th>Precio unitario para facturar</th><th>Importe</th></tr></thead>
       <tbody>${r.filas.map(f=>`<tr><td>${f.qty}</td><td>${esc(f.desc)}</td><td>${fmt(f.precio)}</td>${(parseFloat(q.descMonto)||0)>0?`<td>-${fmt(f.desc_)}</td>`:""}<td>+${fmt(f.envio)}</td><td class="fx-pu">${fmtPU(f.pu)}</td><td>${fmt(f.importe)}</td></tr>`).join("")}</tbody>
       <tfoot><tr><td colspan="${(parseFloat(q.descMonto)||0)>0?6:5}">Subtotal</td><td>${fmt(r.subtotal)}</td></tr>
         <tr><td colspan="${(parseFloat(q.descMonto)||0)>0?6:5}">IVA 16%</td><td>${fmt(r.iva)}</td></tr>
