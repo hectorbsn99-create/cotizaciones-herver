@@ -185,6 +185,21 @@ input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-in
 .ui-box input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,79,171,0.12)}
 .ui-btns{display:flex;justify-content:flex-end;gap:8px}
 
+/* ── PRECIOS PARA FACTURAR ── */
+.fx-box{max-width:780px!important;max-height:90vh;overflow-y:auto}
+.fx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0 10px}
+.fx-tbl th{text-align:right;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:6px;border-bottom:2px solid var(--border)}
+.fx-tbl th:nth-child(1),.fx-tbl th:nth-child(2){text-align:left}
+.fx-tbl td{padding:7px 6px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}
+.fx-tbl td:nth-child(2){text-align:left;white-space:normal}
+.fx-tbl td.fx-pu{font-weight:700;color:#047857;background:#F0FDF4}
+.fx-tbl tfoot td{font-weight:600;border-bottom:none}
+.fx-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 10px}
+.fx-sum div{background:var(--gray-light);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--muted)}
+.fx-sum b{display:block;font-size:14px;color:var(--text)}
+.fx-ok{font-size:12px;padding:8px 10px;border-radius:8px;background:#F0FDF4;border:1px solid #BBF7D0;color:#15803d;margin-bottom:10px}
+.fx-warn{background:#FEF3C7;border-color:#FDE68A;color:#92400E}
+
 /* ── MÓDULOS DESACTIVABLES ── */
 body.no-pedidos #nav-pedidos,body.no-pedidos .mod-pedidos{display:none!important}
 body.no-histoc .mod-histoc{display:none!important}
@@ -1311,6 +1326,7 @@ function renderHistory(){
     <td><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         <button class="btn btn-sm" onclick="reprintPDF('${q.folio}')">Re-imprimir</button>
         <button class="btn btn-sm" style="background:#F5F3FF;border-color:#DDD6FE;color:#6D28D9" onclick="imprimirRemision('${q.folio}')" title="Comprobante de entrega para que firme el cliente">Remisión</button>
+        <button class="btn btn-sm" style="background:#ECFDF5;border-color:#A7F3D0;color:#047857" onclick="preciosFacturar('${q.folio}')" title="Precio unitario por partida con el envío repartido, para capturar en la factura">Facturar</button>
         <button class="btn btn-sm btn-primary" onclick="editQuote('${q.folio}')">Editar</button>
         <button class="btn btn-sm mod-histoc" onclick="convertirAOC('${q.folio}')" title="Crear orden de compra con estas partidas">→ OC</button>
         ${(()=>{const pd=pedidos.find(x=>x.cot===q.folio&&!x.cancelado);return pd?`<button class="btn btn-sm mod-pedidos" style="background:#ECFEFF;border-color:#A5F3FC;color:#0E7490" onclick="abrirPedidoDesdeMenu('${pd.folio}')" title="Ver seguimiento">📦 ${pd.folio}</button>`:`<button class="btn btn-sm btn-success mod-pedidos" onclick="crearPedido('${q.folio}')" title="El cliente pagó o dejó anticipo: crear pedido para seguimiento">→ Pedido</button>`})()}
@@ -1368,6 +1384,72 @@ function usarPrecioAnterior(i){
 }
 function normTxt(t){return String(t||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim()}
 function reprintPDF(f){const q=quotes.find(x=>x.folio===f);if(q)buildPDF(q)}
+
+// ═══════ PRECIOS PARA FACTURAR: el flete no se factura aparte, va dentro del precio unitario ═══════
+// Reparte el envío por pieza (igual para todas las piezas) y el descuento por partida, cuadrando al centavo.
+function calcularFacturacion(q){
+  const items=(q.items||[]).map(it=>({desc:it.desc,qty:parseInt(it.qty)||0,price:parseFloat(it.price)||0}));
+  const env=q.envio||{};
+  const pp0=parseFloat(env.porPieza)||0; // cotizaciones viejas: el envío ya venía dentro del precio
+  const envio=pp0>0?0:(parseFloat(q.envioCosto)||((env.tipo==="incluido"||env.tipo==="cotizado")?(parseFloat(env.costo)||0):0));
+  const pz=items.reduce((s,i)=>s+i.qty,0);
+  const cents=v=>Math.round(v*100);
+  // Reparto en centavos por el método del mayor residuo (la suma cuadra exacto)
+  const repartir=(totalC,pesos)=>{
+    const tot=pesos.reduce((a,b)=>a+b,0);if(!tot)return pesos.map(()=>0);
+    const raw=pesos.map(w=>totalC*w/tot),base=raw.map(Math.floor);
+    let resto=totalC-base.reduce((a,b)=>a+b,0);
+    raw.map((r,i)=>[r-base[i],i]).sort((a,b)=>b[0]-a[0]).forEach(([,i])=>{if(resto>0){base[i]++;resto--;}});
+    return base;
+  };
+  const bruto=items.map(i=>cents(i.qty*(i.price+pp0)));
+  const descC=repartir(cents(parseFloat(q.descMonto)||0),items.map(i=>i.qty*i.price)); // descuento solo sobre productos
+  const envC=repartir(cents(envio),items.map(i=>i.qty));                                // envío igual por pieza
+  const filas=items.map((it,k)=>{
+    const impC=bruto[k]-descC[k]+envC[k];
+    return {desc:it.desc,qty:it.qty,precio:it.price+pp0,desc_:descC[k]/100,envio:envC[k]/100,importe:impC/100,
+      pu:it.qty?Math.round(impC/100/it.qty*1e6)/1e6:0};
+  });
+  const subtotal=filas.reduce((s,f)=>s+f.importe,0);
+  return {filas,envio,pz,subtotal,iva:Math.round(subtotal*16)/100,total:Math.round(subtotal*116)/100,mon:q.moneda||"MXN"};
+}
+function fmtPU(v){const s=v.toFixed(6).replace(/0+$/,"");const d=(s.split(".")[1]||"").length;return v.toLocaleString("es-MX",{minimumFractionDigits:Math.max(2,d),maximumFractionDigits:6});}
+function preciosFacturar(folio){
+  const q=quotes.find(x=>x.folio===folio);if(!q)return;
+  const r=calcularFacturacion(q);
+  const conDec=r.filas.some(f=>Math.abs(f.pu*100-Math.round(f.pu*100))>1e-6);
+  const cuadra=Math.abs(r.total-(parseFloat(q.total)||0))<0.015;
+  const ov=document.createElement("div");ov.className="ui-ov";
+  ov.innerHTML=`<div class="ui-box fx-box"><button class="ui-x" title="Cerrar">×</button>
+    <div class="ui-title">Precios para facturar · ${esc(q.folio)}</div>
+    <div class="ui-msg" style="margin-bottom:8px">${esc(q.cliente)} · Captura en la factura el <b>precio unitario para facturar</b> de cada partida. Ya trae el envío repartido entre las piezas${(parseFloat(q.descMonto)||0)>0?" y el descuento aplicado":""}, así que <b>no captures el flete ni el descuento aparte</b>.</div>
+    <div class="fx-sum">
+      <div>Envío a repartir<b>$${fmt(r.envio)}</b></div>
+      <div>Piezas<b>${r.pz}</b></div>
+      <div>Envío por pieza<b>$${fmt(r.pz?r.envio/r.pz:0)}</b></div>
+      <div>Descuento<b>${(parseFloat(q.descMonto)||0)>0?("-$"+fmt(q.descMonto)):"—"}</b></div>
+    </div>
+    <div style="overflow-x:auto"><table class="fx-tbl">
+      <thead><tr><th>Cant.</th><th>Descripción</th><th>P. cotizado</th>${(parseFloat(q.descMonto)||0)>0?"<th>− Desc.</th>":""}<th>+ Envío</th><th>Precio unitario para facturar</th><th>Importe</th></tr></thead>
+      <tbody>${r.filas.map(f=>`<tr><td>${f.qty}</td><td>${esc(f.desc)}</td><td>${fmt(f.precio)}</td>${(parseFloat(q.descMonto)||0)>0?`<td>-${fmt(f.desc_)}</td>`:""}<td>+${fmt(f.envio)}</td><td class="fx-pu">${fmtPU(f.pu)}</td><td>${fmt(f.importe)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td colspan="${(parseFloat(q.descMonto)||0)>0?6:5}">Subtotal</td><td>${fmt(r.subtotal)}</td></tr>
+        <tr><td colspan="${(parseFloat(q.descMonto)||0)>0?6:5}">IVA 16%</td><td>${fmt(r.iva)}</td></tr>
+        <tr><td colspan="${(parseFloat(q.descMonto)||0)>0?6:5}">Total</td><td>$${fmt(r.total)} ${r.mon}</td></tr></tfoot>
+    </table></div>
+    <div class="fx-ok${cuadra?"":" fx-warn"}">${cuadra?("✓ El total de la factura cuadra con la cotización: $"+fmt(q.total)+" "+r.mon+"."):("Ojo: el total ($"+fmt(r.total)+") difiere de la cotización ($"+fmt(q.total)+") por redondeo del IVA en centavos.")}</div>
+    ${conDec?`<div class="fx-ok fx-warn">Algún precio lleva más de 2 decimales para que el importe cuadre exacto. Captúralo con todos sus decimales; CONTPAQi acepta hasta 6.</div>`:""}
+    <div class="ui-btns"><button class="btn fx-copy">Copiar tabla</button><button class="btn btn-primary fx-close">Listo</button></div></div>`;
+  document.body.appendChild(ov);
+  const close=()=>{document.removeEventListener("keydown",onKey,true);ov.remove();};
+  const onKey=e=>{if(e.key==="Escape"){e.preventDefault();close();}};
+  document.addEventListener("keydown",onKey,true);
+  ov.querySelector(".ui-x").onclick=close;ov.querySelector(".fx-close").onclick=close;
+  ov.addEventListener("mousedown",e=>{if(e.target===ov)close();});
+  ov.querySelector(".fx-copy").onclick=async()=>{
+    const tsv=["Cantidad\tDescripción\tPrecio unitario\tImporte"].concat(r.filas.map(f=>f.qty+"\t"+f.desc+"\t"+f.pu.toFixed(Math.max(2,(f.pu.toFixed(6).replace(/0+$/,"").split(".")[1]||"").length))+"\t"+f.importe.toFixed(2))).join("\n");
+    try{await navigator.clipboard.writeText(tsv);toast("Tabla copiada: pégala en Excel o úsala para capturar");}catch(e){toast("No se pudo copiar automáticamente");}
+  };
+}
 // ═══════════════ REMISIÓN (comprobante de entrega) ═══════════════
 async function imprimirRemision(folioCot){
   const q=quotes.find(x=>x.folio===folioCot);if(!q)return;
