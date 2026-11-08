@@ -1422,7 +1422,7 @@ function preciosFacturar(folio){
   const cuadra=Math.abs(r.total-(parseFloat(q.total)||0))<0.015;
   const dM=parseFloat(q.descMonto)||0, baseProd=(q.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.price)||0),0);
   let dP=parseFloat(q.descuento)||0; if(!dP&&dM>0&&baseProd>0)dP=Math.round(dM/baseProd*10000)/100;
-  const dPtxt=dP?(String(dP).replace(/\.?0+$/,"")+"%"):"";
+  const dPtxt=dP?(String(Math.round(dP*100)/100)+"%"):"";
   const ov=document.createElement("div");ov.className="ui-ov";
   ov.innerHTML=`<div class="ui-box fx-box"><button class="ui-x" title="Cerrar">×</button>
     <div class="ui-title">Precios para facturar · ${esc(q.folio)}</div>
