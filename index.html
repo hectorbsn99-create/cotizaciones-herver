@@ -1063,9 +1063,10 @@ function addManual(){
 }
 function removeItem(i){quoteItems.splice(i,1);renderItems()}
 function changeQty(i,v){quoteItems[i].qty=Math.max(1,parseInt(v)||1);renderItems()}
-function changeEntrega(i,v){quoteItems[i].entrega=v}
+function changeEntrega(i,v){quoteItems[i].entrega=v;envioDiasHint()}
 
 function renderItems(){
+  try{envioDiasHint()}catch(_){}
   const el=document.getElementById("items-container");
   const ct=document.getElementById("item-count");
   const tb=document.getElementById("totals-box");
@@ -1195,9 +1196,10 @@ function diasHabilesTexto(v){
   return v.toUpperCase();
 }
 function envioDiasHint(){
-  const t=diasHabilesTexto(document.getElementById("q-env-dias").value);
-  const tipo=document.getElementById("q-env-tipo").value;
-  document.getElementById("q-env-dias-hint").textContent=t?("En el PDF: "+t):(tipo?("Si lo dejas vacío y las partidas no traen días: "+(tipo==="cobrar"?TIEMPO_PAQUETERIA:TIEMPO_SIN_DEFINIR)):"");
+  const h=document.getElementById("q-env-dias-hint");if(!h)return;
+  const e=getEnvio();
+  const t=(e.tipo||e.dias)?tiempoEntregaTexto(e,typeof quoteItems!=="undefined"?quoteItems:[]):"";
+  h.textContent=t?("En el PDF: "+t):"";
 }
 // Texto del envío para el PDF
 // Renglones de envío para Condiciones del PDF: [[etiqueta, valor], ...]
@@ -1248,18 +1250,21 @@ function envioColumnas(e,items){
   if(d)c.push(["TIEMPO DE ENTREGA",d]);
   return c;
 }
-// Si las partidas tienen distintos días de entrega → "SEGÚN PARTIDA"; si todas iguales → ese; si ninguna trae → el del envío
+// TIEMPO DE ENTREGA del recuadro de envío:
+// 1) Si capturaste el tiempo en el envío → ese manda.
+// 2) Por cobrar sin tiempo → SEGÚN PAQUETERÍA (lo define la paquetería).
+// 3) Si las partidas traen días: todas iguales → ese; distintas o alguna vacía → SEGÚN PARTIDA.
+// 4) Nada capturado → POR CONFIRMAR (nunca se compromete "inmediato" por default).
 function tiempoEntregaTexto(e,items){
-  const vals=(items||[]).map(i=>String(i.entrega||"").trim().toUpperCase().replace(/\s+/g," "));
-  const conValor=vals.filter(Boolean);
-  if(conValor.length){
-    if(new Set(vals).size>1)return "SEGÚN PARTIDA";
-    return diasHabilesTexto(conValor[0]);
-  }
   const d=diasHabilesTexto(e&&e.dias);
-  // Sin tiempo capturado: nunca se compromete "inmediato"; se indica que se confirmará
-  if(!d&&e&&e.tipo)return e.tipo==="cobrar"?TIEMPO_PAQUETERIA:TIEMPO_SIN_DEFINIR;
-  return d;
+  if(d)return d;
+  if(e&&e.tipo==="cobrar")return TIEMPO_PAQUETERIA;
+  const vals=(items||[]).map(i=>String(i.entrega||"").trim().toUpperCase().replace(/\s+/g," "));
+  if(vals.some(Boolean)){
+    if(new Set(vals).size>1)return "SEGÚN PARTIDA";
+    return diasHabilesTexto(vals[0]);
+  }
+  return (e&&e.tipo)?TIEMPO_SIN_DEFINIR:"";
 }
 const TIEMPO_SIN_DEFINIR="POR CONFIRMAR";
 const TIEMPO_PAQUETERIA="SEGÚN PAQUETERÍA"; // por cobrar: el tiempo lo da la paquetería
@@ -1376,7 +1381,7 @@ function usarPrecioAnterior(i){
   const g=(window._manHits||[])[i];if(!g)return;const h=g[0];
   document.getElementById("man-desc").value=h.desc;
   document.getElementById("man-price").value=h.price;
-  document.getElementById("man-entrega").value=h.entrega||"";
+  document.getElementById("man-entrega").value=""; // el tiempo de entrega es de cada cotización: no se hereda de una anterior
   document.getElementById("man-ac-list").classList.remove("show");
   const mon=getMoneda();
   if(h.moneda!==mon)toast("Ojo: ese precio se dio en "+h.moneda+" y esta cotización está en "+mon);
@@ -2014,7 +2019,7 @@ function buildPDF(q){
     doc.setFont("helvetica","normal");doc.setFontSize(8);
     const dl=doc.splitTextToSize(String(item.desc||""),C.descW);
     doc.setFontSize(7);
-    const entTxt=item.entrega?String(item.entrega).toUpperCase():((!item._env&&algunaConDias)?TIEMPO_SIN_DEFINIR:"");
+    const entTxt=item.entrega?diasHabilesTexto(item.entrega):((!item._env&&algunaConDias)?TIEMPO_SIN_DEFINIR:"");
     const el=entTxt?doc.splitTextToSize(entTxt,C.diasW):[];
     const nL=Math.max(dl.length,el.length,1);
     const rh=Math.max(7.5,3.6+nL*3.6);
